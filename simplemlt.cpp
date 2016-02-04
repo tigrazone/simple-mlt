@@ -888,7 +888,7 @@ int main(int argc, char **argv) {
 	long mutation;
 	
 	printf("SimpleMLT\nby Hole http://kagamin.net/hole and tigra http://thrlite.blogspot.com\n");
-	printf("30 oct 2015\n");
+	printf("4 feb 2016\n");
 	
 	printf("-h\thelp\n");
 	printf("/?\t\n");
