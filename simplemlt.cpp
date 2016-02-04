@@ -1,5 +1,5 @@
 // Copyright (c) 2014 hole
-// Copyright (c) 2015 tigra
+// Copyright (c) 2015, 2016 tigra
 // This software is released under the MIT License (http://kagamin.net/hole/license.txt).
 // A part of this software is based on smallpt (http://www.kevinbeason.com/smallpt/) and
 // released under the MIT License (http://kagamin.net/hole/smallpt-license.txt).
@@ -20,11 +20,15 @@
 #define UINT_MAX ((unsigned int)-1)
 
 const double PI = 3.14159265358979323846;
+const double PI1_ = 1.0f/PI;
+const double PI2 = PI + PI;
+const double PI4 = PI2 + PI2;
+
 const double INF = 1e20;
 const double EPS = 1e-6;
 const double MaxDepth = 5;
 
-clock_t startT1,enD1, end_t;
+clock_t startT1,end1, end_t;
 
 
 // *** その他の関数 ***
@@ -44,13 +48,18 @@ unsigned int xor128(void) {
 	x = y; y = z; z = w;
 	return w = (w ^ (w >> 19)) ^ (t ^ (t >> 8)); 
 }
-inline double rand01() { return (double)xor128()/(UINT_MAX); }
+
+const double _ui12345_ = 1.0/(UINT_MAX);
+
+inline double rand01() { return (double)xor128() * _ui12345_; }
 
 // *** データ構造 ***
 struct Vec {
 	double x, y, z;
 	Vec(const double x_ = 0, const double y_ = 0, const double z_ = 0) : x(x_), y(y_), z(z_) {}
 	inline Vec operator+(const Vec &b) const {return Vec(x + b.x, y + b.y, z + b.z);}
+	inline Vec operator+(const double b) const {return Vec(x + b, y + b, z + b);}
+	inline Vec operator-(const double b) const {return Vec(x - b, y - b, z - b);}
 	inline Vec operator-(const Vec &b) const {return Vec(x - b.x, y - b.y, z - b.z);}
 	inline Vec operator*(const double b) const {return Vec(x * b, y * b, z * b);}
 	inline Vec operator/(const double b) const {return Vec(x / b, y / b, z / b);}
@@ -66,6 +75,11 @@ inline const Vec Multiply(const Vec &v1, const Vec &v2) {
 inline const double Dot(const Vec &v1, const Vec &v2) {
 	return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
 }
+
+inline const Vec Neg(const Vec &v1) {
+	return Vec(-v1.x, -v1.y, -v1.z);
+}
+
 inline const Vec Cross(const Vec &v1, const Vec &v2) {
 	return Vec((v1.y * v2.z) - (v1.z * v2.y), (v1.z * v2.x) - (v1.x * v2.z), (v1.x * v2.y) - (v1.y * v2.x));
 }
@@ -88,17 +102,65 @@ enum ReflectionType {
 };
 
 struct Sphere {
-	double radius;
+	double radius,r2;
 	Vec position;
 	Color emission, color;
 	ReflectionType ref_type;
+	Vec bbx_min,bbx_max;
 
 	Sphere(const double radius_, const Vec &position_, const Color &emission_, const Color &color_, const ReflectionType ref_type_) :
-	  radius(radius_), position(position_), emission(emission_), color(color_), ref_type(ref_type_) {}
+	  radius(radius_), position(position_), emission(emission_), color(color_), ref_type(ref_type_) {
+	  r2=radius_*radius_;
+	  bbx_min=position_ - radius_;
+	  bbx_max=position_ + radius_;
+	  }
 	// 入力のrayに対する交差点までの距離を返す。交差しなかったら0を返す。
 	const double intersect(const Ray &ray) {
+	
+	/*
+with 65s
+without 55s	
+*/
+/*
+	//x	
+	if (ray.dir.x<0.0)
+	{
+		if (ray.org.x<bbx_min.x)
+			return 0.0;
+	}
+	else
+	{
+		if (ray.org.x>bbx_max.x)
+			return 0.0;
+	}
+	
+	//y	
+	if (ray.dir.y<0.0)
+	{
+		if (ray.org.y<bbx_min.y)
+			return 0.0;
+	}
+	else
+	{
+		if (ray.org.y>bbx_max.y)
+			return 0.0;
+	}
+	
+	//z	
+	if (ray.dir.z<0.0)
+	{
+		if (ray.org.z<bbx_min.z)
+			return 0.0;
+	}
+	else
+	{
+		if (ray.org.z>bbx_max.z)
+			return 0.0;
+	}
+	 */
 		Vec o_p = position - ray.org;
-		const double b = Dot(o_p, ray.dir), det = b * b - Dot(o_p, o_p) + radius * radius;
+		const double b = Dot(o_p, ray.dir), det = b * b - Dot(o_p, o_p) + r2;
+		
 		if (det >= 0.0) {
 			const double sqrt_det = sqrt(det);
 			const double t1 = b - sqrt_det, t2 = b + sqrt_det;
@@ -106,6 +168,7 @@ struct Sphere {
 			else if(t2 > EPS)	return t2;
 		}
 		return 0.0;
+		
 	}
 };
 
@@ -154,10 +217,11 @@ struct PrimarySample {
 	}
 };
 
-const double s1 = 1.0 / 512.0; 
 const double s2 = 1.0 / 16.0;
-const double s12 = s1 / s2;
-const double s112 = s1 / (s12 + 1.0);
+
+double s1 = 1.0 / 256.0; 
+double s12 = s1 / s2;
+double s112 = s1 / (s12 + 1.0);
 
 // Kelemen MLTにおいて、パス生成に使う各種乱数はprimary spaceからもってくる。
 // PrimarySample()を通常のrand01()の代わりに使ってパス生成する。今回は普通のパストレースを使った。（双方向パストレ等も使える）
@@ -167,7 +231,7 @@ const double s112 = s1 / (s12 + 1.0);
 struct KelemenMLT {
 private:	
 		
-	// LuxRenderから拝借してきた変異関数
+	// LuxR}erから拝借してきた変異関数
 	inline double Mutate(const double  x)
 	{
 	/*
@@ -261,31 +325,46 @@ Color direct_radiance_sample(const Vec &v0, const Vec &normal, const int id,
 KelemenMLT &mlt) 
 {
 	// 光源上の一点をサンプリングする
-	const double r1 = 2 * PI * mlt.NextSample();
+	const double r1 = PI2 * mlt.NextSample();
 	const double r2 = 1.0 - 2.0 * mlt.NextSample();
+	
+	//40s vs 48s 3m
+	const double r22 = sqrt(1.0 - r2*r2);
 	
 	const Vec light_pos = spheres[LightID].position + 
 				((spheres[LightID].radius + EPS) * 
-				Vec(sqrt(1.0 - r2*r2) * cos(r1), 
-				sqrt(1.0 - r2*r2) * sin(r1), 
+				Vec(r22 * cos(r1), 
+				r22 * sin(r1), 
 				r2));
 	
 	// サンプリングした点から計算
 	const Vec light_normal = Normalize(light_pos - spheres[LightID].position);
 	const Vec light_dir = Normalize(light_pos - v0);
-	const double dist2 = (light_pos - v0).LengthSquared();
+	
 	const double dot0 = Dot(normal, light_dir);
-	const double dot1 = Dot(light_normal, -1.0 * light_dir);
+	const double dot1 = -Dot(light_normal, light_dir);
 
-	if (dot0 >= 0 && dot1 >= 0) {
-		const double G = dot0 * dot1 / dist2;
+	if (dot0 >= 0 && dot1 >= 0) 
+	{
+	//tigra
+	const double dist2 = (light_pos - v0).LengthSquared();
+		
 		double t; // レイからシーンの交差 位置までの距離
 		int id_; // 交差したシーン内オブジェクトのID
+		//light cache here add
 		intersect_scene(Ray(v0, light_dir), &t, &id_);
-		if (fabs(sqrt(dist2) - t) < 1e-3) {		
+		if (fabs(sqrt(dist2) - t) < 1e-3) {	
+		
+	
+		const double G = 4.0f *dot0 * dot1 / dist2;
+		
 			return Multiply(spheres[id].color, spheres[LightID].emission) *
-					(1.0 / PI) * G / (1.0 / (4.0 * PI * 
-					pow(spheres[LightID].radius, 2.0)));
+					( G * ( ( 
+					//pow(spheres[LightID].radius, 2.0)
+					//tigra
+					spheres[LightID].r2
+					)
+					));
 		}
 	}
 	return Color();
@@ -305,9 +384,6 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 	const Sphere &obj = spheres[id];
 	const Vec hitpoint = ray.org + t * ray.dir; // 交差位置
 	const Vec normal  = Normalize(hitpoint - obj.position); // 交差位置の法線
-	const Vec orienting_normal = Dot(normal, ray.dir) < 0.0 ? normal : 
-								(-1.0 * normal); 
-								// 交差位置の法線（物体からのレイの入出を考慮）
 								
 	// 色の反射率最大のものを得る。ロシアンルーレットで使う。
 	// ロシアンルーレットの閾値は任意だが色の反射率等を使うとより良い。
@@ -321,13 +397,20 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 			return Color();
 	} else
 		russian_roulette_probability = 1.0; // ロシアンルーレット実行しなかった
+	
+	double rr1 = 1.0f/russian_roulette_probability;
 
 	switch (obj.ref_type) {
 	case DIFFUSE: {
 		// 直接光のサンプリングを行う
 		// Я делать выборку из прямого света
 		if (id != LightID) {
-			const int shadow_ray = 1;
+			
+	const Vec orienting_normal = Dot(normal, ray.dir) < 0.0 ? normal : 
+								Neg( normal); 
+								// 交差位置の法線（物体からのレイの入出を考慮）
+								
+			const int shadow_ray = 4;
 			Vec direct_light;
 			for (int i = 0; i < shadow_ray; i ++) {
 				direct_light = direct_light + 
@@ -345,7 +428,7 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 			v = Cross(w, u);
 			// コサイン項を使った重点的サンプリング
 			// Средоточие выборки с использованием терминов косинуса
-			const double r1 = 2 * PI * mlt.NextSample();
+			const double r1 = PI2 * mlt.NextSample();
 			const double r2 = mlt.NextSample(), r2s = sqrt(r2);
 			Vec dir = Normalize((u * cos(r1) * r2s + 
 								 v * sin(r1) * r2s + 
@@ -353,8 +436,8 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 								));
 
 			return (direct_light + Multiply(obj.color, 
-					radiance(Ray(hitpoint, dir), depth+1, mlt))) / 
-					russian_roulette_probability;
+					radiance(Ray(hitpoint, dir), depth+1, mlt))) * rr1 
+					;
 		} else if (depth == 0) {
 			return obj.emission;
 		} else
@@ -373,7 +456,7 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 		if (lid == LightID)
 			direct_light = spheres[LightID].emission;
 
-		return (direct_light + Multiply(obj.color, radiance(reflection_ray, depth+1, mlt))) / russian_roulette_probability;
+		return (direct_light + Multiply(obj.color, radiance(reflection_ray, depth+1, mlt))) * rr1;
 	} break;
 	case REFRACTION: {
 		Ray reflection_ray = Ray(hitpoint, ray.dir - normal * 2.0 * 
@@ -387,6 +470,10 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 		Vec direct_light;
 		if (lid == LightID)
 			direct_light = spheres[LightID].emission;
+		
+	const Vec orienting_normal = Dot(normal, ray.dir) < 0.0 ? normal : 
+								Neg( normal); 
+								// 交差位置の法線（物体からのレイの入出を考慮）
 
 		bool into = Dot(normal, orienting_normal) > 0.0; // レイがオブジェクトから出るのか、入るのか 
 					// Если луч выходит из объекта или от входа
@@ -400,8 +487,8 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 		
 		if (cos2t < 0.0) { // 全反射した
 			return (direct_light + Multiply(obj.color, 
-			(radiance(reflection_ray, depth+1, mlt)))) / 
-			russian_roulette_probability;
+			(radiance(reflection_ray, depth+1, mlt)))) * rr1 
+			;
 		}
 		
 		
@@ -449,15 +536,15 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 			if (mlt.NextSample() < probability) { // 反射
 				return  Multiply(obj.color, (direct_light + radiance(reflection_ray, depth+1, mlt)) * Re)
 					/ probability
-					/ russian_roulette_probability;
+					* rr1;
 			} else { // 屈折
 				return  Multiply(obj.color, (direct_light_refraction + radiance(refraction_ray, depth+1, mlt)) * Tr)
 					/ (1.0 - probability) 
-					/ russian_roulette_probability;
+					* rr1;
 			}
 		} else { // 屈折と反射の両方を追跡
 			return Multiply(obj.color, (direct_light + radiance(reflection_ray, depth+1, mlt)) * Re
-				                  + (direct_light_refraction + radiance(refraction_ray, depth+1, mlt)) * Tr) / russian_roulette_probability;
+				                  + (direct_light_refraction + radiance(refraction_ray, depth+1, mlt)) * Tr) * rr1;
 		}
 	} break;
 	}
@@ -520,7 +607,7 @@ PathSample generate_new_path(const Ray &camera, const Vec &cx, const Vec &cy, co
 
 	Color c = radiance(ray, 0, mlt);
 
-	return PathSample(x, y, c, 1.0 / (1.0 / weight));
+	return PathSample(x, y, c,  weight);
 }
 
 // MLTする
@@ -529,9 +616,9 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 	// MLTを別々に並列に走らせて結果をマージする Чтобы объединить результат давали отдельно параллельно
 
 	// OpenMP
-	// omp_lock_t lock0;
-	// omp_init_lock(&lock0);
-// #pragma omp parallel for schedule(dynamic, 1)
+	 // omp_lock_t lock0;
+	 // omp_init_lock(&lock0);
+ #pragma omp parallel for schedule(dynamic, 1)
 	for (int mi = 0; mi < mlt_num; mi ++) {
 		if(mlt_num>1)
 			printf("\nMLT pass: %d\n",mi+1);
@@ -545,8 +632,10 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 		//генерировать путь много.
 		//Получить первый путь будет использоваться с этого пути в MLT.
 		int SeedPathMax = width * height ; // 適当に多めの数 //Количество соответствующим много
+		//int SeedPathMax = mutation ; // 適当に多めの数 //Количество соответствующим много
 		
 		SeedPathMax*=0.05; // 5% новых
+		SeedPathMax*=2; // 10% новых
 		
 		if (SeedPathMax <= 0)
 			SeedPathMax = 1;
@@ -568,9 +657,9 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 			sumI += luminance(sample.F);
 			seed_paths[i] = sample;
 		}
-		enD1=clock();
+		end1=clock();
 				
-				print_time(enD1, end_t);
+				print_time(end1, end_t);
 		
 		
 			
@@ -599,9 +688,9 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 				progress += 10;
 				std::cout << progress << "%  " ;
 				std::cout << "Accept: " << accept << " Reject: " << reject << " Rate: " << (100.0 * accept / (accept + reject)) << "%" << std::endl;
-				enD1=clock();
+				end1=clock();
 				
-				print_time(enD1,startT1);
+				print_time(end1,startT1);
 			}
 
 			// この辺も全部論文と同じ（Next()）
@@ -640,14 +729,14 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 		}
 		
 		// OpenMP
-		// omp_set_lock(&lock0);
+		 // omp_set_lock(&lock0);
 		for(long i = 0; i < width * height; i ++) {
 			image[i] = image[i] + tmp_image[i] / mlt_num;
 		}
-		// omp_unset_lock(&lock0);
+		 // omp_unset_lock(&lock0);
 	}
 	// OpenMP
-	// omp_destroy_lock(&lock0);
+	 // omp_destroy_lock(&lock0);
 }
 
 // *** .hdrフォーマットで出力するための関数 ***
@@ -788,8 +877,7 @@ void PrintHelp()
 	printf("-mpp mpps\tmutations per pixel\n");
 	printf("-passes passes\tnumber of MLT passes\n");
 	printf("-width w\twidth of outout image w pixels\n");
-	printf("-height h\theight of outout image w pixels\n");
-	printf("-height h\theight of outout image w pixels\n");	
+	printf("-height h\theight of outout image h pixels\n");
 }
 
 //g++ -O3 -fopenmp simplemlt.cpp
@@ -800,7 +888,7 @@ int main(int argc, char **argv) {
 	long mutation;
 	
 	printf("SimpleMLT\nby Hole http://kagamin.net/hole and tigra http://thrlite.blogspot.com\n");
-	printf("27 june 2015\n");
+	printf("30 oct 2015\n");
 	
 	printf("-h\thelp\n");
 	printf("/?\t\n");
@@ -827,7 +915,7 @@ int main(int argc, char **argv) {
 			std::string arg(argv[i]);
 
 			// print help string (at any position)
-			if(arg == "-h" || arg == "--help" || arg == "/?")
+			if(arg == "-h" || arg == "--help" || arg == "/?" || arg == "-?")
 			{
 				PrintHelp();
 				return 0;
@@ -951,8 +1039,16 @@ int main(int argc, char **argv) {
 	char kmg=get_maga_giga_str(mmm);
 		
 	//printf("muts=%dx%dx%d\n",muts,width,height);
+	
+	if(mlt_num>1)
+	printf("mutations per pass %.2f%c\n", mmm,kmg);
+	else
 	printf("mutations %.2f%c\n", mmm,kmg);
 	
+	
+	s1 = 1.0f / (width>>1); 
+	s12 = s1 / s2;
+	s112 = s1 / (s12 + 1.0f);
 	
 
 	// カメラ位置
@@ -969,14 +1065,14 @@ int main(int argc, char **argv) {
 	
 	render_mlt(mlt_num, mutation, image, camera, cx, cy, width, height);
 	
-	enD1=clock();
+	end1=clock();
 	
 	// .hdrフォーマットで出力 Выходной формат
 	char buf[512];
 	char s[150];
 	char *pointer;
 	
-	get_time_str(s,enD1,startT1);
+	get_time_str(s,end1,startT1);
 	
 	while((pointer=strchr(s, ':'))!=NULL)
 	{
@@ -990,5 +1086,5 @@ int main(int argc, char **argv) {
 	
 	save_hdr_file(buf, image, width, height);
 	
-	print_time(enD1,startT1);
+	print_time(end1,startT1);
 }
