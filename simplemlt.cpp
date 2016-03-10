@@ -62,12 +62,12 @@ struct Vec {
 	inline Vec operator-(const double b) const {return Vec(x - b, y - b, z - b);}
 	inline Vec operator-(const Vec &b) const {return Vec(x - b.x, y - b.y, z - b.z);}
 	inline Vec operator*(const double b) const {return Vec(x * b, y * b, z * b);}
-	inline Vec operator/(const double b) const {return Vec(x / b, y / b, z / b);}
+	inline Vec operator/(const double b) const {const double b1 = 1.0 / b; return Vec(x * b1, y * b1, z * b1);}
 	inline const double LengthSquared() const { return x*x + y*y + z*z; }
 	inline const double Length() const { return sqrt(LengthSquared()); }
 };
 inline Vec operator*(double f, const Vec &v) { return v * f; }
-inline Vec Normalize(const Vec &v) { return v / v.Length(); }
+inline Vec Normalize(const Vec &v) { return v / v.Length(); } //6* 1/ 1sqrt
 // 要素ごとの積をとる
 inline const Vec Multiply(const Vec &v1, const Vec &v2) {
 	return Vec(v1.x * v2.x, v1.y * v2.y, v1.z * v2.z);
@@ -159,8 +159,9 @@ without 55s
 	}
 	 */
 		Vec o_p = position - ray.org;
-		const double b = Dot(o_p, ray.dir), det = b * b - Dot(o_p, o_p) + r2;
 		
+		const double b = Dot(o_p, ray.dir), det = b * b - Dot(o_p, o_p) + r2;
+		//7*
 		if (det >= 0.0) {
 			const double sqrt_det = sqrt(det);
 			const double t1 = b - sqrt_det, t2 = b + sqrt_det;
@@ -174,7 +175,7 @@ without 55s
 
 // *** レンダリングするシーンデータ ****
 // from small ppt
-
+//9 spheres
 Sphere spheres[] = {
 	Sphere(5.0, Vec(50.0, 75.0, 81.6),Color(12,12,12), Color(), DIFFUSE),//照明
 	Sphere(1e5, Vec( 1e5+1,40.8,81.6), Color(), Color(0.75, 0.25, 0.25),DIFFUSE),// 左
@@ -264,7 +265,7 @@ private:
 public:
 	// 論文で使われているものとほぼ同じ
 	int global_time;
-	int large_step;
+	unsigned char large_step;
 	int large_step_time;
 	int used_rand_coords;
 
@@ -289,7 +290,8 @@ public:
 		}
 
 		if (primary_samples[used_rand_coords].modify_time < global_time) {
-			if (large_step > 0) {
+			//if (large_step > 0) {
+			if (large_step) {
 				primary_samples_stack.push(primary_samples[used_rand_coords]);
 				primary_samples[used_rand_coords].modify_time = global_time;
 				primary_samples[used_rand_coords].value = rand01();
@@ -326,7 +328,7 @@ KelemenMLT &mlt)
 {
 	// 光源上の一点をサンプリングする
 	const double r1 = PI2 * mlt.NextSample();
-	const double r2 = 1.0 - 2.0 * mlt.NextSample();
+	const double r2 = 1.0 - 2 * mlt.NextSample();
 	
 	//40s vs 48s 3m
 	const double r22 = sqrt(1.0 - r2*r2);
@@ -346,13 +348,16 @@ KelemenMLT &mlt)
 
 	if (dot0 >= 0 && dot1 >= 0) 
 	{
-	//tigra
-	const double dist2 = (light_pos - v0).LengthSquared();
 		
 		double t; // レイからシーンの交差 位置までの距離
 		int id_; // 交差したシーン内オブジェクトのID
 		//light cache here add
-		intersect_scene(Ray(v0, light_dir), &t, &id_);
+		if(!intersect_scene(Ray(v0, light_dir), &t, &id_))			
+			return Color();
+		
+	//tigra
+	const double dist2 = (light_pos - v0).LengthSquared();
+	
 		if (fabs(sqrt(dist2) - t) < 1e-3) {	
 		
 	
@@ -398,7 +403,7 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 	} else
 		russian_roulette_probability = 1.0; // ロシアンルーレット実行しなかった
 	
-	double rr1 = 1.0f/russian_roulette_probability;
+	const double rr1 = 1.0f/russian_roulette_probability;
 
 	switch (obj.ref_type) {
 	case DIFFUSE: {
@@ -411,21 +416,39 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 								// 交差位置の法線（物体からのレイの入出を考慮）
 								
 			const int shadow_ray = 4;
+			const double sr1 = 1.0 / shadow_ray;
 			Vec direct_light;
 			for (int i = 0; i < shadow_ray; i ++) {
 				direct_light = direct_light + 
 					direct_radiance_sample(hitpoint, orienting_normal, id, mlt) 
-					/ shadow_ray;
+					// / shadow_ray;
+					* sr1;
 			}
 
 			// orienting_normalの方向を基準とした正規直交基底(w, u, v)を作る。この基底に対する半球内で次のレイを飛ばす。
 			Vec w, u, v;
 			w = orienting_normal;
 			if (fabs(w.x) > 0.1)
-				u = Normalize(Cross(Vec(0.0, 1.0, 0.0), w));
+			{
+				//u = Normalize(Cross(Vec(0.0, 1.0, 0.0), w));
+				
+				const double sq = 1.0 / sqrt (w.z * w.z + w.x * w.x);
+				//u = Normalize(Vec(w.z, 0.0, -w.x)); //-6*
+				u = Vec(w.z*sq, 0.0, -w.x*sq); //was 6* 1/ 1sqrt -> 4* 1/ 1sqrt  => -2*
+				
+			}
 			else
-				u = Normalize(Cross(Vec(1.0, 0.0, 0.0), w));
-			v = Cross(w, u);
+			{
+				//u = Normalize(Cross(Vec(1.0, 0.0, 0.0), w));
+				
+				const double sq = 1.0 / sqrt (w.z * w.z + w.y * w.y);
+				//u = Normalize(Vec(0.0, -w.z, w.y)); //-6*
+				
+				u = Vec(0.0, -w.z*sq, w.y*sq); //-2*
+			}
+			
+			v = Cross(w, u); //при оптимизации выходит 4*, несущественно против 6*
+			
 			// コサイン項を使った重点的サンプリング
 			// Средоточие выборки с использованием терминов косинуса
 			const double r1 = PI2 * mlt.NextSample();
@@ -450,7 +473,10 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 		// То же самое и с делится на вероятность русскую рулетку.
 		double lt;
 		int lid;
-		Ray reflection_ray = Ray(hitpoint, ray.dir - normal * 2.0 * Dot(normal, ray.dir));
+		
+		const double dnd = Dot(normal, ray.dir);
+		
+		Ray reflection_ray = Ray(hitpoint, ray.dir - normal * (dnd + dnd) );
 		intersect_scene(reflection_ray, &lt, &lid);
 		Vec direct_light;
 		if (lid == LightID)
@@ -459,8 +485,9 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 		return (direct_light + Multiply(obj.color, radiance(reflection_ray, depth+1, mlt))) * rr1;
 	} break;
 	case REFRACTION: {
-		Ray reflection_ray = Ray(hitpoint, ray.dir - normal * 2.0 * 
-							 Dot(normal, ray.dir));
+		const double dnd = Dot(normal, ray.dir);
+		
+		Ray reflection_ray = Ray(hitpoint, ray.dir - normal * ( dnd + dnd));
 		
 		// 反射方向からの直接光
 		// Прямой свет от направления отражения
@@ -471,7 +498,7 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 		if (lid == LightID)
 			direct_light = spheres[LightID].emission;
 		
-	const Vec orienting_normal = Dot(normal, ray.dir) < 0.0 ? normal : 
+	const Vec orienting_normal = dnd < 0.0 ? normal : 
 								Neg( normal); 
 								// 交差位置の法線（物体からのレイの入出を考慮）
 
@@ -512,14 +539,15 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 		
 		//const double Re = R0 + (1.0 - R0) * pow(c, 5.0);
 		
-		//tigra: 02 pow(c, 5.0) -> 3*		
-		double cc=c*c;
-		const double Re = R0 + (1.0 - R0) * cc*cc*c;
+		//tigra: 02 pow(c, 5.0) -> 3*
+		//const double cc = c*c;
+		const double Re = R0 + (1.0 - R0) * c * c * c * c * c;
 		
 		//tigra: 01+02  3% speedup
 		
 		const double Tr = 1.0 - Re; // 屈折光の運ぶ光の量
 		const double probability  = 0.25 + 0.5 * Re;
+		const double probability1  = 1.0 - probability;
 		
 		// 屈折方向からの直接光
 		Ray refraction_ray = Ray(hitpoint, tdir);
@@ -534,13 +562,21 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 		// Я буду определяется русскую рулетку.
 		if (depth > 2) {
 			if (mlt.NextSample() < probability) { // 反射
+			const double prbblty=probability;
+			
 				return  Multiply(obj.color, (direct_light + radiance(reflection_ray, depth+1, mlt)) * Re)
-					/ probability
-					* rr1;
+					/ (
+					prbblty
+					* rr1
+					);
 			} else { // 屈折
+			const double prbblty=probability1;
+			
 				return  Multiply(obj.color, (direct_light_refraction + radiance(refraction_ray, depth+1, mlt)) * Tr)
-					/ (1.0 - probability) 
-					* rr1;
+					/ (
+					prbblty
+					* rr1
+					);
 			}
 		} else { // 屈折と反射の両方を追跡
 			return Multiply(obj.color, (direct_light + radiance(reflection_ray, depth+1, mlt)) * Re
@@ -563,9 +599,11 @@ struct PathSample {
 	x(x_), y(y_), F(F_), weight(weight_) {}
 };
 
+#define R1(x) ((x)+(x))
+
 // MLTのために新しいパスをサンプリングする関数。 Функция сэмплирования новый путь для
 // 今回はradiance()（パストレ）を使ったが何でもいい。
-PathSample generate_new_path(const Ray &camera, const Vec &cx, const Vec &cy, const int width, const int height, KelemenMLT &mlt, int x, int y) {
+PathSample generate_new_path(const Ray &camera, const Vec &cx, const Vec &cy, const int width, const int height, const double &width1, const double &height1, KelemenMLT &mlt, int x, int y) {
 	double weight = 4.0;
 	if (x < 0) {
 		weight *= width;
@@ -587,21 +625,35 @@ PathSample generate_new_path(const Ray &camera, const Vec &cx, const Vec &cy, co
 	
 	// Оцифровывается палаточном фильтра
 	// Вместо равномерно пробы в диапазоне пикселей, чтобы производить смещение в сбора образца А много в непосредственной близости от центра пикселя
+	//const double r01 = mlt.NextSample();
+	//const double r1 = r01 + r01;
 	
-	const double r1 = 2.0 * mlt.NextSample(),
-				 dx = r1 < 1.0 ? sqrt(r1) - 1.0 : 1.0 - sqrt(2.0 - r1);
+	const double r1 = 2 * mlt.NextSample();
+	const double dx = r1 < 1.0 ? sqrt(r1) - 1.0 : 1.0 - sqrt(2.0 - r1);
+	//const double dx = R1(r01) < 1.0 ? sqrt(R1(r01)) - 1.0 : 1.0 - sqrt(2.0 - R1(r01));
+	//const double dx = r1 < 1.0 ? sqrt(r1) - 1.0 : 1.0 - sqrt(2.0 - r1);
 				 
-	const double r2 = 2.0 * mlt.NextSample(), 
+	const double r2 = 2 * mlt.NextSample(),
 				 dy = r2 < 1.0 ? sqrt(r2) - 1.0 : 1.0 - sqrt(2.0 - r2);
 				 
+				 /*
+	const double r02 = mlt.NextSample();
+	//const double r2 = r02 + r02;
+	
+	const double 
+				 dy = R1(r02) < 1.0 ? sqrt(R1(r02)) - 1.0 : 1.0 - sqrt(2.0 - R1(r02));
+				 //dy = r2 < 1.0 ? sqrt(r2) - 1.0 : 1.0 - sqrt(2.0 - r2);
+				 */
 	//     / 2.0 -> *0.5
 	/*			 
 	Vec dir = cx * (((sx + 0.5 + dx) / 2.0 + x) / width - 0.5) +
 				cy * (((sy + 0.5 + dy) / 2.0 + y) / height- 0.5) + camera.dir;
 	*/
 	
-	Vec dir = cx * (((sx + 0.5 + dx) *0.5 + x) / width - 0.5) +
-				cy * (((sy + 0.5 + dy) *0.5 + y) / height- 0.5) + camera.dir;
+	Vec dir = cx * (((sx + 0.5 + dx) *0.5 + x) * width1 - 0.5) +
+	//Vec dir = cx * (((sx + 0.5 + dx) *0.5 + x) / width - 0.5) +
+				cy * (((sy + 0.5 + dy) *0.5 + y) * height1- 0.5) + camera.dir;
+	//			cy * (((sy + 0.5 + dy) *0.5 + y) / height- 0.5) + camera.dir;
 	
 	const Ray ray = Ray(camera.org + dir * 130.0, Normalize(dir));
 
@@ -615,30 +667,62 @@ PathSample generate_new_path(const Ray &camera, const Vec &cx, const Vec &cy, co
 void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray &camera, const Vec &cx, const Vec &cy, const int width, const int height) {
 	// MLTを別々に並列に走らせて結果をマージする Чтобы объединить результат давали отдельно параллельно
 
+	const long wh0 = width * height;		
+	const double mlt_num1 = 1.0f / mlt_num;
+	
+	const double width1 = 1.0f / width;
+	const double height1 = 1.0f / height;
+	
+		// 1/16 = 0.0625 = 6.25%
+		// 1/8 = 0.125 = 12.5%
+	
+		//Получить первый путь будет использоваться с этого пути в MLT.
+		//const long SeedPathMax = ((wh0 / 16)+(wh0 / 8)) / 2; // 適当に多めの数 //Количество соответствующим много
+		// среднее 9.375%
+		
+		//const long SeedPathMax = ((wh0 >> 4)+(wh0 >> 3) + 16 ) >> 1; // 適当に多めの数 //Количество соответствующим много
+		
+		// /16  6.25%
+		const long SeedPathMax = (wh0 >> 4); // 適当に多めの数 //Количество соответствующим много
+		//int SeedPathMax = mutation ; // 適当に多めの数 //Количество соответствующим много
+		
+		/*
+		SeedPathMax*=0.05; // 5% новых
+		//SeedPathMax*=2; // 10% новых
+		SeedPathMax+=SeedPathMax; // 10% новых
+		*/
+		
+		
+	int num_threads = 0;
+	int num_cores = omp_get_num_procs();
+
+	if(num_threads<1)
+		num_threads  = std::max(1, num_cores )*4;
+	
+	printf("num_threads=%d num_cores=%d\n", num_threads, num_cores);
+		
+    // Set number of used threads
+    omp_set_num_threads(num_threads);
+	
 	// OpenMP
 	 // omp_lock_t lock0;
 	 // omp_init_lock(&lock0);
- #pragma omp parallel for schedule(dynamic, 1)
+ #pragma omp parallel for schedule(dynamic)
 	for (int mi = 0; mi < mlt_num; mi ++) {
 		if(mlt_num>1)
 			printf("\nMLT pass: %d\n",mi+1);
 	
 		std::vector<Color> tmp_image;
-		tmp_image.resize(width * height);
+		tmp_image.resize(wh0);
 
 		KelemenMLT mlt;
 		// たくさんパスを生成する。
 		// このパスからMLTで使う最初のパスを得る。(Markov Chain Monte Carloであった）
 		//генерировать путь много.
-		//Получить первый путь будет использоваться с этого пути в MLT.
-		int SeedPathMax = width * height ; // 適当に多めの数 //Количество соответствующим много
-		//int SeedPathMax = mutation ; // 適当に多めの数 //Количество соответствующим много
-		
-		SeedPathMax*=0.05; // 5% новых
-		SeedPathMax*=2; // 10% новых
-		
+		/*
 		if (SeedPathMax <= 0)
 			SeedPathMax = 1;
+		*/
 			
 		printf("creating SeedPaths %d...\n",SeedPathMax);
 		
@@ -647,9 +731,9 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 		std::vector<PathSample> seed_paths(SeedPathMax);
 		double sumI = 0.0;
 		mlt.large_step = 1;
-		for (int i = 0; i < SeedPathMax; i ++) {
+		for (long i = 0; i < SeedPathMax; i ++) {
 			mlt.InitUsedRandCoords();
-			PathSample sample = generate_new_path(camera, cx, cy, width, height, mlt, -1, -1);
+			PathSample sample = generate_new_path(camera, cx, cy, width, height, width1, height1, mlt, -1, -1);
 			mlt.global_time ++;
 			while (!mlt.primary_samples_stack.empty()) // スタック空にする //стек пустой
 				mlt.primary_samples_stack.pop();
@@ -668,7 +752,7 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 		const double rnd = rand01() * sumI;
 		int selecetd_path = 0;
 		double accumulated_importance = 0.0;
-		for (int i = 0; i < SeedPathMax; i ++) {
+		for (long i = 0; i < SeedPathMax; i ++) {
 			accumulated_importance += luminance(seed_paths[i].F);
 			if (accumulated_importance >= rnd) {
 				selecetd_path = i;
@@ -677,38 +761,99 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 		}
 	
 		// 論文参照
-		const double b = sumI / SeedPathMax;
+		//const double b = sumI / SeedPathMax;
+		
+			const double b1 = SeedPathMax / sumI ;
+		
 		const double p_large = 0.5;
 		const long M = mutation;
+		
+		long idx;
+		
+		const double M1 = 1.0f / M;
+		double olda_time = clock();
+		
+		//const long M2 = M / 100; //1%
+		//compiler do it faster!
+		
 		int accept = 0, reject = 0;	
 		PathSample old_path = seed_paths[selecetd_path];
 		int progress = 0;
 		for (long i = 0; i < M ; i ++) {
-			if ((i + 1) % (M / 10) == 0) {
-				progress += 10;
+			if ((i + 1) % (M / 100) == 0 || progress==99) {
+				end1=clock();
+					
+				progress ++; //1%
+				
+				//printf("delta_time=%.2f\n",end1-olda_time);
+				
+				if(end1-olda_time>3000 || progress==100)
+				{		
+					olda_time=clock();
 				std::cout << progress << "%  " ;
 				std::cout << "Accept: " << accept << " Reject: " << reject << " Rate: " << (100.0 * accept / (accept + reject)) << "%" << std::endl;
-				end1=clock();
+				
 				
 				print_time(end1,startT1);
+				}
 			}
 
 			// この辺も全部論文と同じ（Next()）
 			//Эта сторона также же, как и всей работы
 			mlt.large_step = rand01() < p_large;
 			mlt.InitUsedRandCoords();	
-			PathSample new_path = generate_new_path(camera, cx, cy, width, height, mlt, -1, -1);
-
+			
+			PathSample new_path = generate_new_path(camera, cx, cy, width, height, width1, height1, mlt, -1, -1);
+			
+			/*
 			double a = std::min(1.0, luminance(new_path.F) / luminance(old_path.F));
 			const double new_path_weight = (a + mlt.large_step) / (luminance(new_path.F) / b + p_large) / M;
 			const double old_path_weight = (1.0 - a) / (luminance(old_path.F) / b + p_large) / M;
-
-			tmp_image[new_path.y * width + new_path.x] = tmp_image[new_path.y * width + new_path.x] + new_path.weight * new_path_weight * new_path.F;
-			tmp_image[old_path.y * width + old_path.x] = tmp_image[old_path.y * width + old_path.x] + old_path.weight * old_path_weight * old_path.F;
+			
+			7/
+			1/ вне цикла
+			*/
+			
+			//const double lum_n = luminance(new_path.F);
+			const double lum_n = luminance(new_path.F)*b1;
+			//const double lum_o = luminance(old_path.F);
+			const double lum_o = luminance(old_path.F)*b1;
+						
+			const double a = std::min(1.0, lum_n / lum_o);
+			const double M1a = M1 * a;
+			
+			/*
+			double new_path_weight;
+			
+			if(mlt.large_step)
+				new_path_weight = (M1a + M1 * mlt.large_step) / (lum_n + p_large) ;
+			else
+				new_path_weight = (M1a) / (lum_n + p_large) ;
+			*/
+			
+			const double new_path_weight = (M1a + mlt.large_step * M1 ) / (lum_n + p_large) ;
+			//const double new_path_weight = (M1a + ((mlt.large_step)?M1 :0) ) / (lum_n + p_large) ;
+			//const double new_path_weight = (M1a + M1 * mlt.large_step) / (lum_n * b1 + p_large) ;
+			//const double new_path_weight = (a + mlt.large_step) / (lum_n * b1 + p_large) * M1;
+			
+			const double old_path_weight = (M1 - M1a) / (lum_o + p_large) ;
+			//const double old_path_weight = (M1 - M1a) / (lum_o * b1 + p_large) ;
+			//const double old_path_weight = (1.0 - a) / (lum_o * b1 + p_large) * M1;
+			/*
+			3/ 3*
+			1/ вне цикла
+			*/
+			
+			idx = new_path.y * width + new_path.x;			
+			tmp_image[idx] = tmp_image[idx] + (new_path.weight * new_path_weight) * new_path.F;
+			
+			idx = old_path.y * width + old_path.x;			
+			tmp_image[idx] = tmp_image[idx] + (old_path.weight * old_path_weight) * old_path.F;
 				
-				a*=2; //tigra: this make 60% accept vs ~50%
+				//a*=2; //tigra: this make 60% accept vs ~50%
+				//a+=a; //tigra: this make 60% accept vs ~50%
 				
-			if (rand01() < a) 
+			if (rand01() < (a+a)) 
 			{ 
 			// 受理 //принятие
 				accept ++;
@@ -720,7 +865,7 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 					mlt.primary_samples_stack.pop();
 			} else { // 棄却 //отказ
 				reject ++;
-				int idx = mlt.used_rand_coords - 1;
+				idx = mlt.used_rand_coords - 1;
 				while (!mlt.primary_samples_stack.empty()) {
 					mlt.primary_samples[idx --] = mlt.primary_samples_stack.top();
 					mlt.primary_samples_stack.pop();
@@ -730,8 +875,11 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 		
 		// OpenMP
 		 // omp_set_lock(&lock0);
-		for(long i = 0; i < width * height; i ++) {
-			image[i] = image[i] + tmp_image[i] / mlt_num;
+		 
+		//for(long i = 0; i < width * height; i ++) {
+		for(long i = 0; i < wh0; i ++) {
+			//image[i] = image[i] + tmp_image[i] / mlt_num;
+			image[i] = image[i] + tmp_image[i] * mlt_num1;
 		}
 		 // omp_unset_lock(&lock0);
 	}
@@ -888,7 +1036,7 @@ int main(int argc, char **argv) {
 	long mutation;
 	
 	printf("SimpleMLT\nby Hole http://kagamin.net/hole and tigra http://thrlite.blogspot.com\n");
-	printf("4 feb 2016\n");
+	printf("21 feb 2016\n");
 	
 	printf("-h\thelp\n");
 	printf("/?\t\n");
@@ -1033,6 +1181,9 @@ int main(int argc, char **argv) {
 		{
 			printf("MLT passes: %d\n",mlt_num);
 		}
+		
+	int nnn = (int) sizeof(spheres) / sizeof(Sphere);	
+	printf("objects: %d\n", nnn);
 	
 	double mmm=mutation;
 	
