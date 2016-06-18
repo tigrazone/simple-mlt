@@ -176,6 +176,8 @@ without 55s
 // *** レンダリングするシーンデータ ****
 // from small ppt
 //9 spheres
+//radius, position, emission, color, mat
+
 Sphere spheres[] = {
 	Sphere(5.0, Vec(50.0, 75.0, 81.6),Color(12,12,12), Color(), DIFFUSE),//照明
 	Sphere(1e5, Vec( 1e5+1,40.8,81.6), Color(), Color(0.75, 0.25, 0.25),DIFFUSE),// 左
@@ -188,6 +190,21 @@ Sphere spheres[] = {
 	Sphere(16.5,Vec(73,16.5,78), Color(), Color(1,1,1)*.99, REFRACTION),//ガラス
 };
 const int LightID = 0;
+
+/*
+Sphere spheres[] = {//Scene: radius, position, emission, color, material
+  Sphere(1e5, Vec( 1e5+1,40.8,81.6), Vec(),Vec(.75,.25,.25),DIFFUSE),//Left
+  Sphere(1e5, Vec(-1e5+99,40.8,81.6),Vec(),Vec(.25,.25,.75),DIFFUSE),//Rght
+  Sphere(1e5, Vec(50,40.8, 1e5),     Vec(),Vec(.75,.75,.75),DIFFUSE),//Back
+  Sphere(1e5, Vec(50,40.8,-1e5+170), Vec(),Vec(),           DIFFUSE),//Frnt
+  Sphere(1e5, Vec(50, 1e5, 81.6),    Vec(),Vec(.75,.75,.75),DIFFUSE),//Botm
+  Sphere(1e5, Vec(50,-1e5+81.6,81.6),Vec(),Vec(.75,.75,.75),DIFFUSE),//Top
+  Sphere(16.5,Vec(27,16.5,47),       Vec(),Vec(1,1,1)*.999, SPECULAR),//Mirr
+  Sphere(16.5,Vec(73,16.5,78),       Vec(),Vec(1,1,1)*.999, REFRACTION),//Glas
+  Sphere(1.5, Vec(50,81.6-16.5,81.6),Vec(4,4,4)*100,  Vec(), DIFFUSE),//Lite
+};
+const int LightID = 8;
+*/
 
 // *** レンダリング用関数 ***
 // シーンとの交差判定関数
@@ -333,6 +350,7 @@ KelemenMLT &mlt)
 	//40s vs 48s 3m
 	const double r22 = sqrt(1.0 - r2*r2);
 	
+	//tigra: Light tracing. в реальном приложении надо выбирать с помощью техники из psychopath
 	const Vec light_pos = spheres[LightID].position + 
 				((spheres[LightID].radius + EPS) * 
 				Vec(r22 * cos(r1), 
@@ -341,7 +359,9 @@ KelemenMLT &mlt)
 	
 	// サンプリングした点から計算
 	const Vec light_normal = Normalize(light_pos - spheres[LightID].position);
-	const Vec light_dir = Normalize(light_pos - v0);
+	const Vec light_dir = 
+	Normalize
+	(light_pos - v0);
 	
 	const double dot0 = Dot(normal, light_dir);
 	const double dot1 = -Dot(light_normal, light_dir);
@@ -427,6 +447,7 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 
 			// orienting_normalの方向を基準とした正規直交基底(w, u, v)を作る。この基底に対する半球内で次のレイを飛ばす。
 			Vec w, u, v;
+			
 			w = orienting_normal;
 			if (fabs(w.x) > 0.1)
 			{
@@ -434,7 +455,9 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 				
 				const double sq = 1.0 / sqrt (w.z * w.z + w.x * w.x);
 				//u = Normalize(Vec(w.z, 0.0, -w.x)); //-6*
-				u = Vec(w.z*sq, 0.0, -w.x*sq); //was 6* 1/ 1sqrt -> 4* 1/ 1sqrt  => -2*
+				u = Vec(w.z*sq, 0.0, -w.x*sq); //was 6* 1/ 1sqrt -> 4* 1/ 1sqrt  => -2*				
+			
+				v = Vec(w.y*u.z, w.z*u.x - w.x*u.z, -w.y*u.x);
 				
 			}
 			else
@@ -445,15 +468,20 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 				//u = Normalize(Vec(0.0, -w.z, w.y)); //-6*
 				
 				u = Vec(0.0, -w.z*sq, w.y*sq); //-2*
+				v = Vec(w.y*u.z - w.z*u.y, -w.x*u.z, w.x*u.y);
 			}
 			
-			v = Cross(w, u); //при оптимизации выходит 4*, несущественно против 6*
+			//v = Cross(w, u); 
+			
+			//6* 6* 1/ 1sqrt 6* 6* 1/ 1sqrt => 24* 2/ 2sqrt =>   8* 1/ 1sqrt => -16* 1/ 1sqrt
 			
 			// コサイン項を使った重点的サンプリング
 			// Средоточие выборки с использованием терминов косинуса
 			const double r1 = PI2 * mlt.NextSample();
 			const double r2 = mlt.NextSample(), r2s = sqrt(r2);
-			Vec dir = Normalize((u * cos(r1) * r2s + 
+			Vec dir = 
+			//Normalize
+								((u * cos(r1) * r2s + 
 								 v * sin(r1) * r2s + 
 								 w * sqrt(1.0 - r2)
 								));
@@ -524,7 +552,9 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 		if(!into) aa=-aa;
 		
 		// 屈折していく方向
-		Vec tdir = Normalize(ray.dir * nnt - normal * aa);
+		Vec tdir = 
+		Normalize
+		(ray.dir * nnt - normal * aa);
 		
 		/*
 		// 屈折していく方向
@@ -552,7 +582,10 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 		// 屈折方向からの直接光
 		Ray refraction_ray = Ray(hitpoint, tdir);
 		intersect_scene(refraction_ray, &lt, &lid);
+		
 		Vec direct_light_refraction;
+		
+		//tigra: we HIT the LIGHT!!!!!!
 		if (lid == LightID)
 			direct_light_refraction = spheres[LightID].emission;
 
@@ -605,18 +638,23 @@ struct PathSample {
 // 今回はradiance()（パストレ）を使ったが何でもいい。
 PathSample generate_new_path(const Ray &camera, const Vec &cx, const Vec &cy, const int width, const int height, const double &width1, const double &height1, KelemenMLT &mlt, int x, int y) {
 	double weight = 4.0;
+	
+	//-1 всегда
 	if (x < 0) {
 		weight *= width;
 		x = mlt.NextSample() * width;
 		if (x == width)
 			x = 0;
 	}
+	
+	//-1 всегда
 	if (y < 0) {
 		weight *= height;
 		y = mlt.NextSample() * height;
 		if (y == height)
 			y = 0;
 	}
+	
 	int sx = mlt.NextSample() < 0.5 ? 0 : 1;
 	int sy = mlt.NextSample() < 0.5 ? 0 : 1;
 	
@@ -655,7 +693,9 @@ PathSample generate_new_path(const Ray &camera, const Vec &cx, const Vec &cy, co
 				cy * (((sy + 0.5 + dy) *0.5 + y) * height1- 0.5) + camera.dir;
 	//			cy * (((sy + 0.5 + dy) *0.5 + y) / height- 0.5) + camera.dir;
 	
-	const Ray ray = Ray(camera.org + dir * 130.0, Normalize(dir));
+	const Ray ray = Ray(camera.org + dir * 130.0, 
+	Normalize
+	(dir));
 
 	Color c = radiance(ray, 0, mlt);
 
@@ -683,7 +723,9 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 		//const long SeedPathMax = ((wh0 >> 4)+(wh0 >> 3) + 16 ) >> 1; // 適当に多めの数 //Количество соответствующим много
 		
 		// /16  6.25%
-		const long SeedPathMax = (wh0 >> 4); // 適当に多めの数 //Количество соответствующим много
+		//const long SeedPathMax = (wh0 >> 4); // 適当に多めの数 //Количество соответствующим много
+		const long SeedPathMax = wh0 / 10; // 適当に多めの数 //Количество соответствующим много
+		//const long SeedPathMax = mutation >> 4; // /3=8 4=16 5=32 6=64 7=128 8=256   /32 = 3%   /16 = 6.6%   /8 = 12.5%
 		//int SeedPathMax = mutation ; // 適当に多めの数 //Количество соответствующим много
 		
 		/*
@@ -707,6 +749,7 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 	// OpenMP
 	 // omp_lock_t lock0;
 	 // omp_init_lock(&lock0);
+	 
  #pragma omp parallel for schedule(dynamic)
 	for (int mi = 0; mi < mlt_num; mi ++) {
 		if(mlt_num>1)
@@ -779,6 +822,7 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 		int accept = 0, reject = 0;	
 		PathSample old_path = seed_paths[selecetd_path];
 		int progress = 0;
+		
 		for (long i = 0; i < M ; i ++) {
 			if ((i + 1) % (M / 100) == 0 || progress==99) {
 				end1=clock();
@@ -854,6 +898,7 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 				//a+=a; //tigra: this make 60% accept vs ~50%
 				
 			if (rand01() < (a+a)) 
+			//if (rand01() < (a*1.5)) 
 			{ 
 			// 受理 //принятие
 				accept ++;
@@ -1036,7 +1081,7 @@ int main(int argc, char **argv) {
 	long mutation;
 	
 	printf("SimpleMLT\nby Hole http://kagamin.net/hole and tigra http://thrlite.blogspot.com\n");
-	printf("21 feb 2016\n");
+	printf("18 jun 2016\n");
 	
 	printf("-h\thelp\n");
 	printf("/?\t\n");
@@ -1044,8 +1089,8 @@ int main(int argc, char **argv) {
 	
 	printf("\n");
 	
-	int width = 600;
-	int height = 480;
+	int width = 1024;
+	int height = 768;
 	//int mutation = 32 * width * height;
 	
 	long muts=16;
@@ -1172,7 +1217,7 @@ int main(int argc, char **argv) {
 	
 	if(!m_chng)
 		{
-			printf("Mutations per pixel: %d\n",muts);
+			printf("Mutations per pass: %d\n",muts);
 			
 			mutation = muts * width * height;
 		}
