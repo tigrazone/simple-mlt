@@ -480,6 +480,7 @@ Color radiance(const Ray &ray, const int depth, KelemenMLT &mlt) {
 			const double r1 = PI2 * mlt.NextSample();
 			const double r2 = mlt.NextSample(), r2s = sqrt(r2);
 			Vec dir = 
+			//tigra: not needed, speedup
 			//Normalize
 								((u * cos(r1) * r2s + 
 								 v * sin(r1) * r2s + 
