@@ -895,11 +895,13 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 			idx = old_path.y * width + old_path.x;			
 			tmp_image[idx] = tmp_image[idx] + (old_path.weight * old_path_weight) * old_path.F;
 				
-				//a*=2; //tigra: this make 60% accept vs ~50%
-				//a+=a; //tigra: this make 60% accept vs ~50%
+				//a*=2; //tigra: this make 68% accept vs ~50%
+				//a+=a; //tigra: this make 68% accept vs ~50%
 				
 			//if (rand01() < (a+a)) 
-			if (rand01() < (a*1.5)) 
+			//if (rand01() < (a)) 
+			//if (rand01() < (a*1.5)) 
+			if (rand01() < (a*1.7)) //64% accept
 			{ 
 			// 受理 //принятие
 				accept ++;
