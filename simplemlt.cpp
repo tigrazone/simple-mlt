@@ -898,8 +898,8 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 				//a*=2; //tigra: this make 60% accept vs ~50%
 				//a+=a; //tigra: this make 60% accept vs ~50%
 				
-			if (rand01() < (a+a)) 
-			//if (rand01() < (a*1.5)) 
+			//if (rand01() < (a+a)) 
+			if (rand01() < (a*1.5)) 
 			{ 
 			// 受理 //принятие
 				accept ++;
