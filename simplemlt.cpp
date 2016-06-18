@@ -773,6 +773,8 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 		end_t=clock();
 
 		std::vector<PathSample> seed_paths(SeedPathMax);
+		std::vector<double> lumas(SeedPathMax);
+		
 		double sumI = 0.0;
 		mlt.large_step = 1;
 		for (long i = 0; i < SeedPathMax; i ++) {
@@ -782,7 +784,8 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 			while (!mlt.primary_samples_stack.empty()) // スタック空にする //стек пустой
 				mlt.primary_samples_stack.pop();
 
-			sumI += luminance(sample.F);
+			lumas[i] = luminance(sample.F);
+			sumI += lumas[i];
 			seed_paths[i] = sample;
 		}
 		end1=clock();
@@ -797,7 +800,8 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 		int selecetd_path = 0;
 		double accumulated_importance = 0.0;
 		for (long i = 0; i < SeedPathMax; i ++) {
-			accumulated_importance += luminance(seed_paths[i].F);
+			//accumulated_importance += luminance(seed_paths[i].F);
+			accumulated_importance += lumas[i];
 			if (accumulated_importance >= rnd) {
 				selecetd_path = i;
 				break;
@@ -809,7 +813,7 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 		
 			const double b1 = SeedPathMax / sumI ;
 		
-		const double p_large = 0.5;
+		const double p_large = 0.47; //vs 0.5 64%  0.47 65.75%
 		const long M = mutation;
 		
 		long idx;
@@ -824,6 +828,7 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 		PathSample old_path = seed_paths[selecetd_path];
 		int progress = 0;
 		
+		 #pragma omp parallel for schedule(dynamic,num_threads)
 		for (long i = 0; i < M ; i ++) {
 			if ((i + 1) % (M / 100) == 0 || progress==99) {
 				end1=clock();
@@ -863,6 +868,7 @@ void render_mlt(const int mlt_num, const long mutation, Color *image, const Ray 
 			const double lum_n = luminance(new_path.F)*b1;
 			//const double lum_o = luminance(old_path.F);
 			const double lum_o = luminance(old_path.F)*b1;
+			//const double lum_o = lumas[selecetd_path]*b1; //даёт доп. дикий шум с fireflys
 						
 			const double a = std::min(1.0, lum_n / lum_o);
 			const double M1a = M1 * a;
